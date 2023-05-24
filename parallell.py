@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import random
 import multiprocessing as mp
 
+
 class AlphaZero:
     def __init__(self, model, optimizer, game, args):
         self.model = model
@@ -48,28 +49,27 @@ class AlphaZero:
     def train(self, memory):
         random.shuffle(memory)
         for batchIdx in range(0, len(memory), self.args['batch_size']):
-            sample = memory[batchIdx:min(len(memory) - 1, batchIdx + self.args[
-                'batch_size'])]  # Change to memory[batchIdx:batchIdx+self.args['batch_size']] in case of an error
+            sample = memory[batchIdx:min(len(memory) - 1, batchIdx + self.args['batch_size'])]
             state, policy_targets, value_targets = zip(*sample)
 
             state, policy_targets, value_targets = np.array(state), np.array(policy_targets), np.array(
                 value_targets).reshape(-1, 1)
 
             state = torch.tensor(state, dtype=torch.float32, device=self.model.device)
-            n = self.game.action_size
             policy_targets = torch.tensor(policy_targets, dtype=torch.float32, device=self.model.device)
-
             value_targets = torch.tensor(value_targets, dtype=torch.float32, device=self.model.device)
 
             out_policy, out_value = self.model(state)
 
-            policy_loss = torch.nn.KLDivLoss(reduction='batchmean')(torch.log(out_policy), policy_targets)
+            policy_loss = torch.nn.KLDivLoss(reduction='batchmean')(torch.log_softmax(out_policy, dim=1),
+                                                                     policy_targets)
             value_loss = F.mse_loss(out_value, value_targets)
             loss = policy_loss + value_loss
 
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+
     def learn(self):
         for iteration in range(self.args['num_iterations']):
             memory = []
@@ -98,10 +98,8 @@ class MCTS:
     def search(self, state):
         root = Node(self.game, self.args, state, visit_count=1)
 
-        policy, _ = self.model(
-            torch.tensor(self.game.get_encoded_state(state), device=self.model.device).unsqueeze(0)
-        )
-        policy = torch.softmax(policy, axis=1).squeeze(0).cpu().numpy()
+        policy, _ = self.model(torch.tensor(self.game.get_encoded_state(state), device=self.model.device).unsqueeze(0))
+        policy = torch.softmax(policy, dim=1).squeeze(0).cpu().numpy()
         policy = (1 - self.args['dirichlet_epsilon']) * policy + self.args['dirichlet_epsilon'] \
                  * np.random.dirichlet([self.args['dirichlet_alpha']] * self.game.action_size)
 
@@ -117,10 +115,11 @@ class MCTS:
             results.append(pool.apply_async(self.perform_search, args=(root,)))
         pool.close()
         pool.join()
+
         action_probs = np.zeros(self.game.action_size)
-        total_visits=0
+        total_visits = 0
         for result in results:
-            child_action_probs, child_visits=result.get()
+            child_action_probs, child_visits = result.get()
             action_probs += child_action_probs
             total_visits += child_visits
         action_probs /= total_visits
@@ -141,7 +140,7 @@ class MCTS:
                 policy, value = self.model(
                     torch.tensor(self.game.get_encoded_state(node.state), device=self.model.device).unsqueeze(0)
                 )
-                policy = torch.softmax(policy, axis=1).squeeze(0).detach().cpu().numpy()
+                policy = torch.softmax(policy, dim=1).squeeze(0).detach().cpu().numpy()
                 valid_moves = self.game.get_valid_moves(node.state)
                 policy *= valid_moves
                 policy /= np.sum(policy)
@@ -152,6 +151,7 @@ class MCTS:
             for child in root.children:
                 action_probs[child.action_taken] += child.visit_count
         return action_probs, visits
+
 
 class Node:
     def __init__(self, game, args, state, parent=None, action_taken=None, prior=0, visit_count=0):
@@ -190,6 +190,7 @@ class Node:
         return q_value + self.args['C'] * (math.sqrt(self.visit_count) / (child.visit_count + 1)) * child.prior
 
     def expand(self, policy):
+        child = None
         for action, prob in enumerate(policy):
             if prob > 0:
                 child_state = self.state.copy()
