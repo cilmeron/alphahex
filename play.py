@@ -5,23 +5,9 @@ import numpy as np
 from parallell import MCTS
 
 if __name__ == '__main__':
-    args = {
-        'C': 2,
-        'num_searches': 60,
-        'num_processes': 5,
-        'num_iterations': 3,
-        'num_selfPlay_iterations': 100,
-        'num_parallel_games': 100,
-        'num_epochs': 4,
-        'batch_size': 128,
-        'temperature': 1.25,
-        'dirichlet_epsilon': 0.25,
-        'dirichlet_alpha': 0.3
-    }
-
     game = Hex()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = HexModel(game, 49, 5, device)
+    model = HexModel(game, 49, 64, device)
     model.load_state_dict(torch.load('model_0.pt', map_location=device))
     model.eval()
     state = game.get_init_state()
@@ -52,11 +38,13 @@ if __name__ == '__main__':
                 print("invalid action")
                 continue
         else:
+            print(state)
             neutral_state = game.change_perspective(state, player)
             encoded_state = game.get_encoded_state(neutral_state)
             tensor_state = torch.tensor(encoded_state, device=device).unsqueeze(0)
             policy, value = model(tensor_state)
             valid_moves = game.get_valid_moves(neutral_state)
+            print(valid_moves)
             value = value.item()
             probs = torch.softmax(policy, axis=1).squeeze(0).detach().cpu().numpy()
             probs *= valid_moves

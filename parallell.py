@@ -47,6 +47,8 @@ class AlphaZero:
             player = self.game.get_opponent(player)
 
     def train(self, memory):
+        if not memory:
+            return
         random.shuffle(memory)
         for batchIdx in range(0, len(memory), self.args['batch_size']):
             sample = memory[batchIdx:min(len(memory) - 1, batchIdx + self.args['batch_size'])]
@@ -72,13 +74,16 @@ class AlphaZero:
 
     def learn(self):
         for iteration in range(self.args['num_iterations']):
-            memory = []
-
+            print(iteration, " of ", self.args['num_iterations'])
             self.model.eval()
-            for selfPlay_iteration in range(self.args['num_selfPlay_iterations']):
-                print(".", end="")
-                memory += self.selfPlay()
-            print("\n")
+            pool = mp.Pool(processes=self.args['num_processes'])
+            results = [pool.apply_async(self.selfPlay) for _ in range(self.args['num_selfPlay_iterations'])]
+            pool.close()
+            pool.join()
+            memory = []
+            for result in results:
+                memory += result.get()
+
             self.model.train()
             for epoch in range(self.args['num_epochs']):
                 print("o", end="")
@@ -108,28 +113,9 @@ class MCTS:
         policy /= np.sum(policy)
         root.expand(policy)
 
-        num_processes = self.args['num_processes']
-        pool = mp.Pool(processes=num_processes)
-        results = []
-        for _ in range(num_processes):
-            results.append(pool.apply_async(self.perform_search, args=(root,)))
-        pool.close()
-        pool.join()
-
         action_probs = np.zeros(self.game.action_size)
         total_visits = 0
-        for result in results:
-            child_action_probs, child_visits = result.get()
-            action_probs += child_action_probs
-            total_visits += child_visits
-        action_probs /= total_visits
-        return action_probs
-
-    def perform_search(self, root):
-        visits = 0
-        action_probs = np.zeros(self.game.action_size)
-
-        for _ in range(self.args['num_searches'] // self.args['num_processes']):
+        for _ in range(self.args['num_searches']):
             node = root
             while node.is_fully_expanded():
                 node = node.select()
@@ -147,10 +133,11 @@ class MCTS:
                 value = value.item()
                 node.expand(policy)
             node.backpropagate(value)
-            visits += 1
+            total_visits += 1
             for child in root.children:
                 action_probs[child.action_taken] += child.visit_count
-        return action_probs, visits
+        action_probs /= total_visits
+        return action_probs
 
 
 class Node:

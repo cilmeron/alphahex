@@ -3,8 +3,8 @@ import numpy as np
 
 class Hex:
     def __init__(self):
-        self.row_count = 4
-        self.column_count = 4
+        self.row_count = 7
+        self.column_count = 7
         self.action_size = self.row_count * self.column_count
 
     def __repr__(self):
